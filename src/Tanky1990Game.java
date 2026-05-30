@@ -31,6 +31,8 @@ public class Tanky1990Game extends JPanel {
     private static final int CELL_STEEL = -1;
     // Полная прочность кирпичной стены: для разрушения нужны три попадания.
     private static final int BRICK_MAX_HEALTH = 3;
+    // Размер откалываемого куска кирпича за одно попадание.
+    private static final int BRICK_DAMAGE_STEP = TILE_SIZE / BRICK_MAX_HEALTH;
     // Шанс случайного появления кирпича в каждой внутренней клетке карты.
     private static final float BRICK_SPAWN_CHANCE = 0.15f;
     // Первая клетка безопасной зоны спавна игрока по оси X.
@@ -100,6 +102,8 @@ public class Tanky1990Game extends JPanel {
 
     // Сетка карты: 0 — пусто, -1 — сталь, 1..3 — прочность кирпича.
     private final int[][] map = new int[MAP_H][MAP_W];
+    // Физические и визуальные границы оставшейся части кирпича внутри клетки.
+    private final Rectangle[][] brickBounds = new Rectangle[MAP_H][MAP_W];
     // Экземпляр танка игрока.
     private final Tank player;
     // Список активных вражеских танков.
@@ -200,6 +204,7 @@ public class Tanky1990Game extends JPanel {
         for (int y = 0; y < MAP_H; y++) {
             for (int x = 0; x < MAP_W; x++) {
                 map[y][x] = CELL_EMPTY;
+                brickBounds[y][x] = null;
             }
         }
 
@@ -216,6 +221,7 @@ public class Tanky1990Game extends JPanel {
             for (int x = 2; x < MAP_W - 2; x++) {
                 if (random.nextFloat() < BRICK_SPAWN_CHANCE) {
                     map[y][x] = BRICK_MAX_HEALTH;
+                    brickBounds[y][x] = new Rectangle(0, 0, TILE_SIZE, TILE_SIZE);
                 }
             }
         }
@@ -223,6 +229,7 @@ public class Tanky1990Game extends JPanel {
         for (int y = MAP_H - PLAYER_SAFE_AREA_BOTTOM_OFFSET; y < MAP_H - 1; y++) {
             for (int x = PLAYER_SAFE_AREA_X1; x < PLAYER_SAFE_AREA_X2; x++) {
                 map[y][x] = CELL_EMPTY;
+                brickBounds[y][x] = null;
             }
         }
     }
@@ -304,8 +311,8 @@ public class Tanky1990Game extends JPanel {
 
             int tx = b.x / TILE_SIZE;
             int ty = b.y / TILE_SIZE;
-            if (map[ty][tx] > CELL_EMPTY) {
-                map[ty][tx]--;
+            if (map[ty][tx] > CELL_EMPTY && brickContainsPoint(tx, ty, b.x, b.y)) {
+                damageBrick(tx, ty, b);
                 it.remove();
                 continue;
             }
@@ -399,23 +406,17 @@ public class Tanky1990Game extends JPanel {
         int playerCy = player.y + TILE_SIZE / 2;
 
         if (Math.abs(enemyCx - playerCx) <= ENEMY_SIGHT_TOLERANCE) {
-            int x = enemyCx / TILE_SIZE;
-            int y1 = Math.min(enemyCy, playerCy) / TILE_SIZE;
-            int y2 = Math.max(enemyCy, playerCy) / TILE_SIZE;
-            for (int y = y1; y <= y2; y++) {
-                if (map[y][x] != CELL_EMPTY) return false;
+            for (int y = Math.min(enemyCy, playerCy); y <= Math.max(enemyCy, playerCy); y += BULLET_SPEED) {
+                if (wallContainsPoint(enemyCx, y)) return false;
             }
-            return true;
+            return !wallContainsPoint(enemyCx, Math.max(enemyCy, playerCy));
         }
 
         if (Math.abs(enemyCy - playerCy) <= ENEMY_SIGHT_TOLERANCE) {
-            int y = enemyCy / TILE_SIZE;
-            int x1 = Math.min(enemyCx, playerCx) / TILE_SIZE;
-            int x2 = Math.max(enemyCx, playerCx) / TILE_SIZE;
-            for (int x = x1; x <= x2; x++) {
-                if (map[y][x] != CELL_EMPTY) return false;
+            for (int x = Math.min(enemyCx, playerCx); x <= Math.max(enemyCx, playerCx); x += BULLET_SPEED) {
+                if (wallContainsPoint(x, enemyCy)) return false;
             }
-            return true;
+            return !wallContainsPoint(Math.max(enemyCx, playerCx), enemyCy);
         }
 
         return false;
@@ -447,7 +448,8 @@ public class Tanky1990Game extends JPanel {
 
         for (int y = top; y <= bottom; y++) {
             for (int x = left; x <= right; x++) {
-                if (map[y][x] != CELL_EMPTY) return false;
+                if (map[y][x] == CELL_STEEL) return false;
+                if (map[y][x] > CELL_EMPTY && brickIntersects(x, y, next)) return false;
             }
         }
 
@@ -520,7 +522,7 @@ public class Tanky1990Game extends JPanel {
             for (int x = 0; x < MAP_W; x++) {
                 int cell = map[y][x];
                 if (cell > CELL_EMPTY) {
-                    drawBrick(g2, x, y, cell);
+                    drawBrick(g2, x, y);
                 } else if (cell == CELL_STEEL) {
                     g2.setColor(STEEL_COLOR);
                     g2.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
@@ -548,10 +550,84 @@ public class Tanky1990Game extends JPanel {
         }
     }
 
-    private void drawBrick(Graphics2D g2, int tileX, int tileY, int health) {
-        int visibleWidth = TILE_SIZE * health / BRICK_MAX_HEALTH;
+    private void drawBrick(Graphics2D g2, int tileX, int tileY) {
+        Rectangle bounds = brickBounds[tileY][tileX];
+        if (bounds == null) return;
+
         g2.setColor(BRICK_COLOR);
-        g2.fillRect(tileX * TILE_SIZE, tileY * TILE_SIZE, visibleWidth, TILE_SIZE);
+        g2.fillRect(tileX * TILE_SIZE + bounds.x, tileY * TILE_SIZE + bounds.y, bounds.width, bounds.height);
+    }
+
+    private void damageBrick(int tileX, int tileY, Bullet bullet) {
+        map[tileY][tileX]--;
+        if (map[tileY][tileX] <= CELL_EMPTY) {
+            map[tileY][tileX] = CELL_EMPTY;
+            brickBounds[tileY][tileX] = null;
+            return;
+        }
+
+        Rectangle bounds = brickBounds[tileY][tileX];
+        if (bounds == null) {
+            bounds = new Rectangle(0, 0, TILE_SIZE, TILE_SIZE);
+            brickBounds[tileY][tileX] = bounds;
+        }
+
+        if (Math.abs(bullet.dx) >= Math.abs(bullet.dy)) {
+            if (bullet.dx > 0) {
+                removeBrickFromLeft(bounds);
+            } else {
+                removeBrickFromRight(bounds);
+            }
+        } else if (bullet.dy > 0) {
+            removeBrickFromTop(bounds);
+        } else {
+            removeBrickFromBottom(bounds);
+        }
+    }
+
+    private void removeBrickFromLeft(Rectangle bounds) {
+        int removed = Math.min(BRICK_DAMAGE_STEP, bounds.width);
+        bounds.x += removed;
+        bounds.width -= removed;
+    }
+
+    private void removeBrickFromRight(Rectangle bounds) {
+        bounds.width = Math.max(0, bounds.width - BRICK_DAMAGE_STEP);
+    }
+
+    private void removeBrickFromTop(Rectangle bounds) {
+        int removed = Math.min(BRICK_DAMAGE_STEP, bounds.height);
+        bounds.y += removed;
+        bounds.height -= removed;
+    }
+
+    private void removeBrickFromBottom(Rectangle bounds) {
+        bounds.height = Math.max(0, bounds.height - BRICK_DAMAGE_STEP);
+    }
+
+    private boolean brickIntersects(int tileX, int tileY, Rectangle target) {
+        Rectangle bounds = getBrickWorldBounds(tileX, tileY);
+        return bounds != null && bounds.intersects(target);
+    }
+
+    private boolean brickContainsPoint(int tileX, int tileY, int worldX, int worldY) {
+        Rectangle bounds = getBrickWorldBounds(tileX, tileY);
+        return bounds != null && bounds.contains(worldX, worldY);
+    }
+
+    private boolean wallContainsPoint(int worldX, int worldY) {
+        if (worldX < 0 || worldY < 0 || worldX >= WIDTH || worldY >= HEIGHT) return true;
+
+        int tileX = worldX / TILE_SIZE;
+        int tileY = worldY / TILE_SIZE;
+        if (map[tileY][tileX] == CELL_STEEL) return true;
+        return map[tileY][tileX] > CELL_EMPTY && brickContainsPoint(tileX, tileY, worldX, worldY);
+    }
+
+    private Rectangle getBrickWorldBounds(int tileX, int tileY) {
+        Rectangle bounds = brickBounds[tileY][tileX];
+        if (bounds == null) return null;
+        return new Rectangle(tileX * TILE_SIZE + bounds.x, tileY * TILE_SIZE + bounds.y, bounds.width, bounds.height);
     }
 
     private void updateReloads() {
