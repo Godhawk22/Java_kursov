@@ -7,23 +7,117 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 
+/**
+ * Main game panel: owns the map, game loop, input bindings, rendering,
+ * player tank, enemy tanks, and bullets.
+ */
 public class Tanky1990Game extends JPanel {
+    // Size of one map tile in pixels.
     private static final int TILE_SIZE = 32;
+    // Map width in tiles.
     private static final int MAP_W = 20;
+    // Map height in tiles.
     private static final int MAP_H = 15;
+    // Window/game field width in pixels.
     private static final int WIDTH = MAP_W * TILE_SIZE;
+    // Window/game field height in pixels.
     private static final int HEIGHT = MAP_H * TILE_SIZE;
+    // Delay between game-loop ticks in milliseconds.
+    private static final int TIMER_DELAY_MS = 16;
 
-    private final int[][] map = new int[MAP_H][MAP_W]; // 0-empty,1-brick,2-steel
+    // Empty map cell value.
+    private static final int CELL_EMPTY = 0;
+    // Steel wall map cell value: indestructible obstacle.
+    private static final int CELL_STEEL = -1;
+    // Full brick wall health: each brick needs three bullet hits to disappear.
+    private static final int BRICK_MAX_HEALTH = 3;
+    // Random brick generation chance for each inner map tile.
+    private static final float BRICK_SPAWN_CHANCE = 0.15f;
+    // First tile of the safe player spawn area on X axis.
+    private static final int PLAYER_SAFE_AREA_X1 = 1;
+    // Last tile (exclusive) of the safe player spawn area on X axis.
+    private static final int PLAYER_SAFE_AREA_X2 = 5;
+    // First tile of the safe player spawn area on Y axis, counted from the bottom.
+    private static final int PLAYER_SAFE_AREA_BOTTOM_OFFSET = 3;
+
+    // Player starting tile on X axis.
+    private static final int PLAYER_START_TILE_X = 2;
+    // Player starting tile on Y axis.
+    private static final int PLAYER_START_TILE_Y = MAP_H - 2;
+    // Player movement speed in pixels per game-loop tick.
+    private static final int PLAYER_SPEED = 2;
+    // Player starting lives.
+    private static final int PLAYER_START_LIVES = 3;
+    // Player reload duration in game-loop ticks.
+    private static final int PLAYER_RELOAD_TICKS = 16;
+    // Player body color.
+    private static final Color PLAYER_COLOR = new Color(55, 180, 80);
+
+    // Number of enemies spawned at a new game/reset.
+    private static final int INITIAL_ENEMY_COUNT = 2;
+    // Maximum enemies allowed on the map at once.
+    private static final int MAX_ENEMIES = 6;
+    // Enemy spawn interval in game-loop ticks.
+    private static final int ENEMY_SPAWN_INTERVAL_TICKS = 180;
+    // Enemy spawn retry count before skipping a blocked spawn.
+    private static final int ENEMY_SPAWN_RETRIES = 10;
+    // Enemy movement speed in pixels per game-loop tick.
+    private static final int ENEMY_SPEED = 1;
+    // Minimum random AI direction duration in game-loop ticks.
+    private static final int ENEMY_AI_MIN_TICKS = 20;
+    // Extra random AI direction duration range in game-loop ticks.
+    private static final int ENEMY_AI_RANDOM_TICKS = 40;
+    // Enemy chance to fire when choosing a new patrol direction.
+    private static final float ENEMY_RANDOM_SHOT_CHANCE = 0.25f;
+    // Enemy reload duration in game-loop ticks.
+    private static final int ENEMY_RELOAD_TICKS = 35;
+    // Enemy line-of-sight tolerance in pixels for aligning with the player.
+    private static final int ENEMY_SIGHT_TOLERANCE = 8;
+    // Score awarded for destroying one enemy.
+    private static final int ENEMY_SCORE_REWARD = 100;
+    // Enemy spawn lanes in tile coordinates.
+    private static final int[] ENEMY_SPAWN_LANES = {2, MAP_W / 2, MAP_W - 3};
+    // Enemy body color.
+    private static final Color ENEMY_COLOR = new Color(180, 60, 60);
+
+    // Bullet speed in pixels per game-loop tick.
+    private static final int BULLET_SPEED = 3;
+    // Bullet radius in pixels.
+    private static final int BULLET_RADIUS = 3;
+    // Bullet color.
+    private static final Color BULLET_COLOR = Color.YELLOW;
+
+    // Brick wall color.
+    private static final Color BRICK_COLOR = new Color(178, 87, 34);
+    // Steel wall color.
+    private static final Color STEEL_COLOR = Color.GRAY;
+    // HUD text color.
+    private static final Color HUD_COLOR = Color.WHITE;
+    // Game-over text color.
+    private static final Color GAME_OVER_COLOR = new Color(255, 40, 40);
+    // Game-over font size.
+    private static final float GAME_OVER_FONT_SIZE = 42f;
+
+    // Map grid: 0 is empty, -1 is steel, 1..3 is brick health.
+    private final int[][] map = new int[MAP_H][MAP_W];
+    // Player tank instance.
     private final Tank player;
+    // Active enemy tank list.
     private final List<Tank> enemies = new ArrayList<>();
+    // Active bullet list.
     private final List<Bullet> bullets = new ArrayList<>();
+    // Current pressed/released state for movement keys.
     private final boolean[] keys = new boolean[256];
+    // Random source for map generation, enemy spawning, and AI decisions.
     private final Random random = new Random();
 
+    // Counts ticks until the next enemy spawn attempt.
     private int enemySpawnTimer = 0;
+    // Player score.
     private int score = 0;
-    private int lives = 3;
+    // Remaining player lives.
+    private int lives = PLAYER_START_LIVES;
+    // True after the player loses all lives.
     private boolean gameOver = false;
 
     public Tanky1990Game() {
@@ -32,13 +126,12 @@ public class Tanky1990Game extends JPanel {
         setFocusable(true);
         initMap();
 
-        player = new Tank(2 * TILE_SIZE, (MAP_H - 2) * TILE_SIZE, Direction.UP, true);
-        spawnEnemy();
-        spawnEnemy();
+        player = new Tank(PLAYER_START_TILE_X * TILE_SIZE, PLAYER_START_TILE_Y * TILE_SIZE, Direction.UP, true);
+        spawnInitialEnemies();
 
         setupControls();
 
-        Timer timer = new Timer(16, this::gameLoop);
+        Timer timer = new Timer(TIMER_DELAY_MS, this::gameLoop);
         timer.start();
     }
 
@@ -106,30 +199,30 @@ public class Tanky1990Game extends JPanel {
     private void initMap() {
         for (int y = 0; y < MAP_H; y++) {
             for (int x = 0; x < MAP_W; x++) {
-                map[y][x] = 0;
+                map[y][x] = CELL_EMPTY;
             }
         }
 
         for (int x = 0; x < MAP_W; x++) {
-            map[0][x] = 2;
-            map[MAP_H - 1][x] = 2;
+            map[0][x] = CELL_STEEL;
+            map[MAP_H - 1][x] = CELL_STEEL;
         }
         for (int y = 0; y < MAP_H; y++) {
-            map[y][0] = 2;
-            map[y][MAP_W - 1] = 2;
+            map[y][0] = CELL_STEEL;
+            map[y][MAP_W - 1] = CELL_STEEL;
         }
 
         for (int y = 2; y < MAP_H - 2; y++) {
             for (int x = 2; x < MAP_W - 2; x++) {
-                if (random.nextFloat() < 0.15f) {
-                    map[y][x] = 1;
+                if (random.nextFloat() < BRICK_SPAWN_CHANCE) {
+                    map[y][x] = BRICK_MAX_HEALTH;
                 }
             }
         }
 
-        for (int y = MAP_H - 3; y < MAP_H - 1; y++) {
-            for (int x = 1; x < 5; x++) {
-                map[y][x] = 0;
+        for (int y = MAP_H - PLAYER_SAFE_AREA_BOTTOM_OFFSET; y < MAP_H - 1; y++) {
+            for (int x = PLAYER_SAFE_AREA_X1; x < PLAYER_SAFE_AREA_X2; x++) {
+                map[y][x] = CELL_EMPTY;
             }
         }
     }
@@ -151,16 +244,16 @@ public class Tanky1990Game extends JPanel {
         Direction dir = player.direction;
 
         if (keys[KeyEvent.VK_UP] || keys[KeyEvent.VK_W]) {
-            dy = -2;
+            dy = -PLAYER_SPEED;
             dir = Direction.UP;
         } else if (keys[KeyEvent.VK_DOWN] || keys[KeyEvent.VK_S]) {
-            dy = 2;
+            dy = PLAYER_SPEED;
             dir = Direction.DOWN;
         } else if (keys[KeyEvent.VK_LEFT] || keys[KeyEvent.VK_A]) {
-            dx = -2;
+            dx = -PLAYER_SPEED;
             dir = Direction.LEFT;
         } else if (keys[KeyEvent.VK_RIGHT] || keys[KeyEvent.VK_D]) {
-            dx = 2;
+            dx = PLAYER_SPEED;
             dir = Direction.RIGHT;
         }
 
@@ -180,26 +273,18 @@ public class Tanky1990Game extends JPanel {
 
             enemy.aiTimer--;
             if (enemy.aiTimer <= 0) {
-                enemy.aiTimer = 20 + random.nextInt(40);
-                enemy.direction = Direction.values()[random.nextInt(4)];
-                if (random.nextFloat() < 0.25f) shoot(enemy);
+                enemy.aiTimer = ENEMY_AI_MIN_TICKS + random.nextInt(ENEMY_AI_RANDOM_TICKS);
+                enemy.direction = Direction.values()[random.nextInt(Direction.values().length)];
+                if (random.nextFloat() < ENEMY_RANDOM_SHOT_CHANCE) shoot(enemy);
             }
 
-            int dx = 0;
-            int dy = 0;
-            switch (enemy.direction) {
-                case UP -> dy = -1;
-                case DOWN -> dy = 1;
-                case LEFT -> dx = -1;
-                case RIGHT -> dx = 1;
-            }
-
-            boolean moved = moveTank(enemy, dx, dy);
+            int[] step = stepForDirection(enemy.direction, ENEMY_SPEED);
+            boolean moved = moveTank(enemy, step[0], step[1]);
             if (!moved) {
                 enemy.direction = directionToPlayer(enemy);
-                int[] step = stepForDirection(enemy.direction);
+                step = stepForDirection(enemy.direction, ENEMY_SPEED);
                 if (!moveTank(enemy, step[0], step[1])) {
-                    enemy.direction = Direction.values()[random.nextInt(4)];
+                    enemy.direction = Direction.values()[random.nextInt(Direction.values().length)];
                 }
             }
         }
@@ -219,12 +304,12 @@ public class Tanky1990Game extends JPanel {
 
             int tx = b.x / TILE_SIZE;
             int ty = b.y / TILE_SIZE;
-            if (map[ty][tx] == 1) {
-                map[ty][tx] = 0;
+            if (map[ty][tx] > CELL_EMPTY) {
+                map[ty][tx]--;
                 it.remove();
                 continue;
             }
-            if (map[ty][tx] == 2) {
+            if (map[ty][tx] == CELL_STEEL) {
                 it.remove();
                 continue;
             }
@@ -233,8 +318,8 @@ public class Tanky1990Game extends JPanel {
                 if (!b.fromPlayer) {
                     lives--;
                     if (lives <= 0) gameOver = true;
-                    player.x = 2 * TILE_SIZE;
-                    player.y = (MAP_H - 2) * TILE_SIZE;
+                    player.x = PLAYER_START_TILE_X * TILE_SIZE;
+                    player.y = PLAYER_START_TILE_Y * TILE_SIZE;
                 }
                 it.remove();
                 continue;
@@ -246,7 +331,7 @@ public class Tanky1990Game extends JPanel {
                 if (hitTank(b, e)) {
                     if (b.fromPlayer) {
                         enemies.remove(i);
-                        score += 100;
+                        score += ENEMY_SCORE_REWARD;
                     }
                     enemyHit = true;
                     break;
@@ -265,16 +350,21 @@ public class Tanky1990Game extends JPanel {
 
     private void maybeSpawnEnemy() {
         enemySpawnTimer++;
-        if (enemySpawnTimer >= 180 && enemies.size() < 6) {
+        if (enemySpawnTimer >= ENEMY_SPAWN_INTERVAL_TICKS && enemies.size() < MAX_ENEMIES) {
             enemySpawnTimer = 0;
             spawnEnemy();
         }
     }
 
+    private void spawnInitialEnemies() {
+        for (int i = 0; i < INITIAL_ENEMY_COUNT; i++) {
+            spawnEnemy();
+        }
+    }
+
     private void spawnEnemy() {
-        int[] lanes = {2, MAP_W / 2, MAP_W - 3};
-        for (int i = 0; i < 10; i++) {
-            int lane = lanes[random.nextInt(lanes.length)];
+        for (int i = 0; i < ENEMY_SPAWN_RETRIES; i++) {
+            int lane = ENEMY_SPAWN_LANES[random.nextInt(ENEMY_SPAWN_LANES.length)];
             int x = lane * TILE_SIZE;
             int y = TILE_SIZE;
             if (canSpawnAt(x, y)) {
@@ -308,22 +398,22 @@ public class Tanky1990Game extends JPanel {
         int playerCx = player.x + TILE_SIZE / 2;
         int playerCy = player.y + TILE_SIZE / 2;
 
-        if (Math.abs(enemyCx - playerCx) <= 8) {
+        if (Math.abs(enemyCx - playerCx) <= ENEMY_SIGHT_TOLERANCE) {
             int x = enemyCx / TILE_SIZE;
             int y1 = Math.min(enemyCy, playerCy) / TILE_SIZE;
             int y2 = Math.max(enemyCy, playerCy) / TILE_SIZE;
             for (int y = y1; y <= y2; y++) {
-                if (map[y][x] != 0) return false;
+                if (map[y][x] != CELL_EMPTY) return false;
             }
             return true;
         }
 
-        if (Math.abs(enemyCy - playerCy) <= 8) {
+        if (Math.abs(enemyCy - playerCy) <= ENEMY_SIGHT_TOLERANCE) {
             int y = enemyCy / TILE_SIZE;
             int x1 = Math.min(enemyCx, playerCx) / TILE_SIZE;
             int x2 = Math.max(enemyCx, playerCx) / TILE_SIZE;
             for (int x = x1; x <= x2; x++) {
-                if (map[y][x] != 0) return false;
+                if (map[y][x] != CELL_EMPTY) return false;
             }
             return true;
         }
@@ -331,12 +421,12 @@ public class Tanky1990Game extends JPanel {
         return false;
     }
 
-    private int[] stepForDirection(Direction direction) {
+    private int[] stepForDirection(Direction direction, int speed) {
         return switch (direction) {
-            case UP -> new int[]{0, -1};
-            case DOWN -> new int[]{0, 1};
-            case LEFT -> new int[]{-1, 0};
-            case RIGHT -> new int[]{1, 0};
+            case UP -> new int[]{0, -speed};
+            case DOWN -> new int[]{0, speed};
+            case LEFT -> new int[]{-speed, 0};
+            case RIGHT -> new int[]{speed, 0};
         };
     }
 
@@ -357,7 +447,7 @@ public class Tanky1990Game extends JPanel {
 
         for (int y = top; y <= bottom; y++) {
             for (int x = left; x <= right; x++) {
-                if (map[y][x] != 0) return false;
+                if (map[y][x] != CELL_EMPTY) return false;
             }
         }
 
@@ -381,44 +471,44 @@ public class Tanky1990Game extends JPanel {
         if (t.reload > 0) return;
         int bx = t.x + TILE_SIZE / 2;
         int by = t.y + TILE_SIZE / 2;
-        int speed = 6;
         int dx = 0, dy = 0;
         switch (t.direction) {
             case UP -> {
                 by = t.y - 1;
-                dy = -speed;
+                dy = -BULLET_SPEED;
             }
             case DOWN -> {
                 by = t.y + TILE_SIZE;
-                dy = speed;
+                dy = BULLET_SPEED;
             }
             case LEFT -> {
                 bx = t.x - 1;
-                dx = -speed;
+                dx = -BULLET_SPEED;
             }
             case RIGHT -> {
                 bx = t.x + TILE_SIZE;
-                dx = speed;
+                dx = BULLET_SPEED;
             }
         }
         bullets.add(new Bullet(bx, by, dx, dy, t.isPlayer));
-        t.reload = t.isPlayer ? 16 : 35;
+        t.reload = t.isPlayer ? PLAYER_RELOAD_TICKS : ENEMY_RELOAD_TICKS;
         System.out.printf("SHOT: %s direction=%s bullet=(%d,%d) tank=(%d,%d)%n",
                 t.isPlayer ? "player" : "bot", t.direction, bx, by, t.x, t.y);
     }
 
     private void resetGame() {
         score = 0;
-        lives = 3;
+        lives = PLAYER_START_LIVES;
         gameOver = false;
         bullets.clear();
         enemies.clear();
         initMap();
-        player.x = 2 * TILE_SIZE;
-        player.y = (MAP_H - 2) * TILE_SIZE;
+        player.x = PLAYER_START_TILE_X * TILE_SIZE;
+        player.y = PLAYER_START_TILE_Y * TILE_SIZE;
         player.direction = Direction.UP;
-        spawnEnemy();
-        spawnEnemy();
+        player.reload = 0;
+        enemySpawnTimer = 0;
+        spawnInitialEnemies();
     }
 
     @Override
@@ -429,35 +519,39 @@ public class Tanky1990Game extends JPanel {
         for (int y = 0; y < MAP_H; y++) {
             for (int x = 0; x < MAP_W; x++) {
                 int cell = map[y][x];
-                if (cell == 1) {
-                    g2.setColor(new Color(178, 87, 34));
-                    g2.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-                } else if (cell == 2) {
-                    g2.setColor(Color.GRAY);
+                if (cell > CELL_EMPTY) {
+                    drawBrick(g2, x, y, cell);
+                } else if (cell == CELL_STEEL) {
+                    g2.setColor(STEEL_COLOR);
                     g2.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
                 }
             }
         }
 
-        drawTank(g2, player, new Color(55, 180, 80));
-        for (Tank e : enemies) drawTank(g2, e, new Color(180, 60, 60));
+        drawTank(g2, player, PLAYER_COLOR);
+        for (Tank e : enemies) drawTank(g2, e, ENEMY_COLOR);
 
-        g2.setColor(Color.YELLOW);
+        g2.setColor(BULLET_COLOR);
         for (Bullet b : bullets) {
-            g2.fillOval(b.x - 3, b.y - 3, 6, 6);
+            g2.fillOval(b.x - BULLET_RADIUS, b.y - BULLET_RADIUS, BULLET_RADIUS * 2, BULLET_RADIUS * 2);
         }
 
-        g2.setColor(Color.WHITE);
+        g2.setColor(HUD_COLOR);
         g2.drawString("Score: " + score + "   Lives: " + lives + "   R - restart", 12, 18);
 
         if (gameOver) {
-            g2.setFont(g2.getFont().deriveFont(Font.BOLD, 42f));
+            g2.setFont(g2.getFont().deriveFont(Font.BOLD, GAME_OVER_FONT_SIZE));
             String text = "GAME OVER";
             int w = g2.getFontMetrics().stringWidth(text);
-            g2.setColor(new Color(255, 40, 40));
+            g2.setColor(GAME_OVER_COLOR);
             g2.drawString(text, (WIDTH - w) / 2, HEIGHT / 2);
         }
+    }
 
+    private void drawBrick(Graphics2D g2, int tileX, int tileY, int health) {
+        int visibleWidth = TILE_SIZE * health / BRICK_MAX_HEALTH;
+        g2.setColor(BRICK_COLOR);
+        g2.fillRect(tileX * TILE_SIZE, tileY * TILE_SIZE, visibleWidth, TILE_SIZE);
     }
 
     private void updateReloads() {
@@ -494,8 +588,10 @@ public class Tanky1990Game extends JPanel {
         });
     }
 
+    /** Direction in which a tank is facing and shooting. */
     private enum Direction {UP, DOWN, LEFT, RIGHT}
 
+    /** Mutable tank entity used for both the player and enemy bots. */
     private static class Tank {
         int x, y;
         Direction direction;
@@ -511,6 +607,7 @@ public class Tanky1990Game extends JPanel {
         }
     }
 
+    /** Bullet entity with position, velocity, and ownership flag. */
     private static class Bullet {
         int x, y;
         final int dx, dy;
