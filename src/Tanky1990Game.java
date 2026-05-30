@@ -1,7 +1,6 @@
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
-import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -37,25 +36,7 @@ public class Tanky1990Game extends JPanel {
         spawnEnemy();
         spawnEnemy();
 
-        addKeyListener(new KeyAdapter() {
-            @Override
-            public void keyPressed(KeyEvent e) {
-                int k = e.getKeyCode();
-                if (k < keys.length) keys[k] = true;
-                if (k == KeyEvent.VK_SPACE && !gameOver) {
-                    shoot(player);
-                }
-                if (k == KeyEvent.VK_R) {
-                    resetGame();
-                }
-            }
-
-            @Override
-            public void keyReleased(KeyEvent e) {
-                int k = e.getKeyCode();
-                if (k < keys.length) keys[k] = false;
-            }
-        });
+        setupControls();
 
         Timer timer = new Timer(16, this::gameLoop);
         timer.start();
@@ -65,6 +46,61 @@ public class Tanky1990Game extends JPanel {
     public void addNotify() {
         super.addNotify();
         requestFocusInWindow();
+    }
+
+    private void setupControls() {
+        bindMovementKey(KeyEvent.VK_UP);
+        bindMovementKey(KeyEvent.VK_DOWN);
+        bindMovementKey(KeyEvent.VK_LEFT);
+        bindMovementKey(KeyEvent.VK_RIGHT);
+        bindMovementKey(KeyEvent.VK_W);
+        bindMovementKey(KeyEvent.VK_A);
+        bindMovementKey(KeyEvent.VK_S);
+        bindMovementKey(KeyEvent.VK_D);
+
+        InputMap inputMap = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+        ActionMap actionMap = getActionMap();
+
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, 0), "shoot");
+        actionMap.put("shoot", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                if (!gameOver) {
+                    shoot(player);
+                }
+            }
+        });
+
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_R, 0), "reset");
+        actionMap.put("reset", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                resetGame();
+            }
+        });
+    }
+
+    private void bindMovementKey(int keyCode) {
+        InputMap inputMap = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+        ActionMap actionMap = getActionMap();
+        String pressedName = "pressed_" + keyCode;
+        String releasedName = "released_" + keyCode;
+
+        inputMap.put(KeyStroke.getKeyStroke(keyCode, 0, false), pressedName);
+        actionMap.put(pressedName, new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                keys[keyCode] = true;
+            }
+        });
+
+        inputMap.put(KeyStroke.getKeyStroke(keyCode, 0, true), releasedName);
+        actionMap.put(releasedName, new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                keys[keyCode] = false;
+            }
+        });
     }
 
     private void initMap() {
@@ -104,6 +140,7 @@ public class Tanky1990Game extends JPanel {
             updateEnemies();
             updateBullets();
             maybeSpawnEnemy();
+            updateReloads();
         }
         repaint();
     }
@@ -160,7 +197,8 @@ public class Tanky1990Game extends JPanel {
             boolean moved = moveTank(enemy, dx, dy);
             if (!moved) {
                 enemy.direction = directionToPlayer(enemy);
-                if (!moveTank(enemy, dx, dy)) {
+                int[] step = stepForDirection(enemy.direction);
+                if (!moveTank(enemy, step[0], step[1])) {
                     enemy.direction = Direction.values()[random.nextInt(4)];
                 }
             }
@@ -293,6 +331,15 @@ public class Tanky1990Game extends JPanel {
         return false;
     }
 
+    private int[] stepForDirection(Direction direction) {
+        return switch (direction) {
+            case UP -> new int[]{0, -1};
+            case DOWN -> new int[]{0, 1};
+            case LEFT -> new int[]{-1, 0};
+            case RIGHT -> new int[]{1, 0};
+        };
+    }
+
     private boolean moveTank(Tank t, int dx, int dy) {
         if (dx == 0 && dy == 0) return true;
         int nx = t.x + dx;
@@ -337,13 +384,27 @@ public class Tanky1990Game extends JPanel {
         int speed = 6;
         int dx = 0, dy = 0;
         switch (t.direction) {
-            case UP -> dy = -speed;
-            case DOWN -> dy = speed;
-            case LEFT -> dx = -speed;
-            case RIGHT -> dx = speed;
+            case UP -> {
+                by = t.y - 1;
+                dy = -speed;
+            }
+            case DOWN -> {
+                by = t.y + TILE_SIZE;
+                dy = speed;
+            }
+            case LEFT -> {
+                bx = t.x - 1;
+                dx = -speed;
+            }
+            case RIGHT -> {
+                bx = t.x + TILE_SIZE;
+                dx = speed;
+            }
         }
         bullets.add(new Bullet(bx, by, dx, dy, t.isPlayer));
         t.reload = t.isPlayer ? 16 : 35;
+        System.out.printf("SHOT: %s direction=%s bullet=(%d,%d) tank=(%d,%d)%n",
+                t.isPlayer ? "player" : "bot", t.direction, bx, by, t.x, t.y);
     }
 
     private void resetGame() {
@@ -397,8 +458,13 @@ public class Tanky1990Game extends JPanel {
             g2.drawString(text, (WIDTH - w) / 2, HEIGHT / 2);
         }
 
+    }
+
+    private void updateReloads() {
         if (player.reload > 0) player.reload--;
-        for (Tank e : enemies) if (e.reload > 0) e.reload--;
+        for (Tank e : enemies) {
+            if (e.reload > 0) e.reload--;
+        }
     }
 
     private void drawTank(Graphics2D g2, Tank t, Color body) {
