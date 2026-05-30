@@ -8,116 +8,116 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * Main game panel: owns the map, game loop, input bindings, rendering,
- * player tank, enemy tanks, and bullets.
+ * Главная игровая панель: хранит карту, игровой цикл, привязки клавиш,
+ * отрисовку, танк игрока, танки врагов и пули.
  */
 public class Tanky1990Game extends JPanel {
-    // Size of one map tile in pixels.
+    // Размер одной клетки карты в пикселях.
     private static final int TILE_SIZE = 32;
-    // Map width in tiles.
+    // Ширина карты в клетках.
     private static final int MAP_W = 20;
-    // Map height in tiles.
+    // Высота карты в клетках.
     private static final int MAP_H = 15;
-    // Window/game field width in pixels.
+    // Ширина окна и игрового поля в пикселях.
     private static final int WIDTH = MAP_W * TILE_SIZE;
-    // Window/game field height in pixels.
+    // Высота окна и игрового поля в пикселях.
     private static final int HEIGHT = MAP_H * TILE_SIZE;
-    // Delay between game-loop ticks in milliseconds.
+    // Задержка между шагами игрового цикла в миллисекундах.
     private static final int TIMER_DELAY_MS = 16;
 
-    // Empty map cell value.
+    // Значение пустой клетки карты.
     private static final int CELL_EMPTY = 0;
-    // Steel wall map cell value: indestructible obstacle.
+    // Значение стальной стены: неразрушаемое препятствие.
     private static final int CELL_STEEL = -1;
-    // Full brick wall health: each brick needs three bullet hits to disappear.
+    // Полная прочность кирпичной стены: для разрушения нужны три попадания.
     private static final int BRICK_MAX_HEALTH = 3;
-    // Random brick generation chance for each inner map tile.
+    // Шанс случайного появления кирпича в каждой внутренней клетке карты.
     private static final float BRICK_SPAWN_CHANCE = 0.15f;
-    // First tile of the safe player spawn area on X axis.
+    // Первая клетка безопасной зоны спавна игрока по оси X.
     private static final int PLAYER_SAFE_AREA_X1 = 1;
-    // Last tile (exclusive) of the safe player spawn area on X axis.
+    // Последняя клетка безопасной зоны спавна игрока по оси X (не включительно).
     private static final int PLAYER_SAFE_AREA_X2 = 5;
-    // First tile of the safe player spawn area on Y axis, counted from the bottom.
+    // Смещение первой клетки безопасной зоны спавна игрока по оси Y от нижнего края.
     private static final int PLAYER_SAFE_AREA_BOTTOM_OFFSET = 3;
 
-    // Player starting tile on X axis.
+    // Стартовая клетка игрока по оси X.
     private static final int PLAYER_START_TILE_X = 2;
-    // Player starting tile on Y axis.
+    // Стартовая клетка игрока по оси Y.
     private static final int PLAYER_START_TILE_Y = MAP_H - 2;
-    // Player movement speed in pixels per game-loop tick.
+    // Скорость движения игрока в пикселях за шаг игрового цикла.
     private static final int PLAYER_SPEED = 2;
-    // Player starting lives.
+    // Начальное количество жизней игрока.
     private static final int PLAYER_START_LIVES = 3;
-    // Player reload duration in game-loop ticks.
+    // Длительность перезарядки игрока в шагах игрового цикла.
     private static final int PLAYER_RELOAD_TICKS = 16;
-    // Player body color.
+    // Цвет корпуса танка игрока.
     private static final Color PLAYER_COLOR = new Color(55, 180, 80);
 
-    // Number of enemies spawned at a new game/reset.
+    // Количество врагов при новой игре или сбросе.
     private static final int INITIAL_ENEMY_COUNT = 2;
-    // Maximum enemies allowed on the map at once.
+    // Максимальное количество врагов на карте одновременно.
     private static final int MAX_ENEMIES = 6;
-    // Enemy spawn interval in game-loop ticks.
+    // Интервал спавна врагов в шагах игрового цикла.
     private static final int ENEMY_SPAWN_INTERVAL_TICKS = 180;
-    // Enemy spawn retry count before skipping a blocked spawn.
+    // Количество попыток спавна врага перед пропуском заблокированной позиции.
     private static final int ENEMY_SPAWN_RETRIES = 10;
-    // Enemy movement speed in pixels per game-loop tick.
+    // Скорость движения врага в пикселях за шаг игрового цикла.
     private static final int ENEMY_SPEED = 1;
-    // Minimum random AI direction duration in game-loop ticks.
+    // Минимальная длительность случайного направления AI в шагах игрового цикла.
     private static final int ENEMY_AI_MIN_TICKS = 20;
-    // Extra random AI direction duration range in game-loop ticks.
+    // Дополнительный случайный диапазон длительности направления AI в шагах игрового цикла.
     private static final int ENEMY_AI_RANDOM_TICKS = 40;
-    // Enemy chance to fire when choosing a new patrol direction.
+    // Шанс выстрела врага при выборе нового направления патрулирования.
     private static final float ENEMY_RANDOM_SHOT_CHANCE = 0.25f;
-    // Enemy reload duration in game-loop ticks.
+    // Длительность перезарядки врага в шагах игрового цикла.
     private static final int ENEMY_RELOAD_TICKS = 35;
-    // Enemy line-of-sight tolerance in pixels for aligning with the player.
+    // Допуск линии видимости врага в пикселях для выравнивания с игроком.
     private static final int ENEMY_SIGHT_TOLERANCE = 8;
-    // Score awarded for destroying one enemy.
+    // Очки за уничтожение одного врага.
     private static final int ENEMY_SCORE_REWARD = 100;
-    // Enemy spawn lanes in tile coordinates.
+    // Линии спавна врагов в координатах клеток.
     private static final int[] ENEMY_SPAWN_LANES = {2, MAP_W / 2, MAP_W - 3};
-    // Enemy body color.
+    // Цвет корпуса вражеского танка.
     private static final Color ENEMY_COLOR = new Color(180, 60, 60);
 
-    // Bullet speed in pixels per game-loop tick.
+    // Скорость пули в пикселях за шаг игрового цикла.
     private static final int BULLET_SPEED = 3;
-    // Bullet radius in pixels.
+    // Радиус пули в пикселях.
     private static final int BULLET_RADIUS = 3;
-    // Bullet color.
+    // Цвет пули.
     private static final Color BULLET_COLOR = Color.YELLOW;
 
-    // Brick wall color.
+    // Цвет кирпичной стены.
     private static final Color BRICK_COLOR = new Color(178, 87, 34);
-    // Steel wall color.
+    // Цвет стальной стены.
     private static final Color STEEL_COLOR = Color.GRAY;
-    // HUD text color.
+    // Цвет текста интерфейса.
     private static final Color HUD_COLOR = Color.WHITE;
-    // Game-over text color.
+    // Цвет текста окончания игры.
     private static final Color GAME_OVER_COLOR = new Color(255, 40, 40);
-    // Game-over font size.
+    // Размер шрифта текста окончания игры.
     private static final float GAME_OVER_FONT_SIZE = 42f;
 
-    // Map grid: 0 is empty, -1 is steel, 1..3 is brick health.
+    // Сетка карты: 0 — пусто, -1 — сталь, 1..3 — прочность кирпича.
     private final int[][] map = new int[MAP_H][MAP_W];
-    // Player tank instance.
+    // Экземпляр танка игрока.
     private final Tank player;
-    // Active enemy tank list.
+    // Список активных вражеских танков.
     private final List<Tank> enemies = new ArrayList<>();
-    // Active bullet list.
+    // Список активных пуль.
     private final List<Bullet> bullets = new ArrayList<>();
-    // Current pressed/released state for movement keys.
+    // Текущее состояние нажатия клавиш движения.
     private final boolean[] keys = new boolean[256];
-    // Random source for map generation, enemy spawning, and AI decisions.
+    // Генератор случайных чисел для карты, спавна врагов и решений AI.
     private final Random random = new Random();
 
-    // Counts ticks until the next enemy spawn attempt.
+    // Счётчик шагов до следующей попытки спавна врага.
     private int enemySpawnTimer = 0;
-    // Player score.
+    // Счёт игрока.
     private int score = 0;
-    // Remaining player lives.
+    // Оставшиеся жизни игрока.
     private int lives = PLAYER_START_LIVES;
-    // True after the player loses all lives.
+    // Становится true, когда игрок теряет все жизни.
     private boolean gameOver = false;
 
     public Tanky1990Game() {
@@ -588,10 +588,10 @@ public class Tanky1990Game extends JPanel {
         });
     }
 
-    /** Direction in which a tank is facing and shooting. */
+    /** Направление, в которое танк смотрит и стреляет. */
     private enum Direction {UP, DOWN, LEFT, RIGHT}
 
-    /** Mutable tank entity used for both the player and enemy bots. */
+    /** Изменяемая сущность танка для игрока и вражеских ботов. */
     private static class Tank {
         int x, y;
         Direction direction;
@@ -607,7 +607,7 @@ public class Tanky1990Game extends JPanel {
         }
     }
 
-    /** Bullet entity with position, velocity, and ownership flag. */
+    /** Сущность пули с позицией, скоростью и признаком владельца. */
     private static class Bullet {
         int x, y;
         final int dx, dy;
