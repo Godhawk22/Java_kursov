@@ -45,7 +45,7 @@ public class Tanky1990Game extends JPanel {
                 if (k == KeyEvent.VK_SPACE && !gameOver) {
                     shoot(player);
                 }
-                if (k == KeyEvent.VK_R && gameOver) {
+                if (k == KeyEvent.VK_R) {
                     resetGame();
                 }
             }
@@ -59,6 +59,12 @@ public class Tanky1990Game extends JPanel {
 
         Timer timer = new Timer(16, this::gameLoop);
         timer.start();
+    }
+
+    @Override
+    public void addNotify() {
+        super.addNotify();
+        requestFocusInWindow();
     }
 
     private void initMap() {
@@ -127,6 +133,14 @@ public class Tanky1990Game extends JPanel {
 
     private void updateEnemies() {
         for (Tank enemy : enemies) {
+            if (enemySeesPlayer(enemy)) {
+                enemy.direction = directionToPlayer(enemy);
+                if (enemy.reload == 0) {
+                    shoot(enemy);
+                }
+                continue;
+            }
+
             enemy.aiTimer--;
             if (enemy.aiTimer <= 0) {
                 enemy.aiTimer = 20 + random.nextInt(40);
@@ -145,7 +159,10 @@ public class Tanky1990Game extends JPanel {
 
             boolean moved = moveTank(enemy, dx, dy);
             if (!moved) {
-                enemy.direction = Direction.values()[random.nextInt(4)];
+                enemy.direction = directionToPlayer(enemy);
+                if (!moveTank(enemy, dx, dy)) {
+                    enemy.direction = Direction.values()[random.nextInt(4)];
+                }
             }
         }
     }
@@ -218,8 +235,62 @@ public class Tanky1990Game extends JPanel {
 
     private void spawnEnemy() {
         int[] lanes = {2, MAP_W / 2, MAP_W - 3};
-        int lane = lanes[random.nextInt(lanes.length)];
-        enemies.add(new Tank(lane * TILE_SIZE, TILE_SIZE, Direction.DOWN, false));
+        for (int i = 0; i < 10; i++) {
+            int lane = lanes[random.nextInt(lanes.length)];
+            int x = lane * TILE_SIZE;
+            int y = TILE_SIZE;
+            if (canSpawnAt(x, y)) {
+                enemies.add(new Tank(x, y, Direction.DOWN, false));
+                return;
+            }
+        }
+    }
+
+    private boolean canSpawnAt(int x, int y) {
+        Rectangle spawn = new Rectangle(x, y, TILE_SIZE, TILE_SIZE);
+        if (new Rectangle(player.x, player.y, TILE_SIZE, TILE_SIZE).intersects(spawn)) return false;
+        for (Tank e : enemies) {
+            if (new Rectangle(e.x, e.y, TILE_SIZE, TILE_SIZE).intersects(spawn)) return false;
+        }
+        return true;
+    }
+
+    private Direction directionToPlayer(Tank enemy) {
+        int dx = player.x - enemy.x;
+        int dy = player.y - enemy.y;
+        if (Math.abs(dx) > Math.abs(dy)) {
+            return dx < 0 ? Direction.LEFT : Direction.RIGHT;
+        }
+        return dy < 0 ? Direction.UP : Direction.DOWN;
+    }
+
+    private boolean enemySeesPlayer(Tank enemy) {
+        int enemyCx = enemy.x + TILE_SIZE / 2;
+        int enemyCy = enemy.y + TILE_SIZE / 2;
+        int playerCx = player.x + TILE_SIZE / 2;
+        int playerCy = player.y + TILE_SIZE / 2;
+
+        if (Math.abs(enemyCx - playerCx) <= 8) {
+            int x = enemyCx / TILE_SIZE;
+            int y1 = Math.min(enemyCy, playerCy) / TILE_SIZE;
+            int y2 = Math.max(enemyCy, playerCy) / TILE_SIZE;
+            for (int y = y1; y <= y2; y++) {
+                if (map[y][x] != 0) return false;
+            }
+            return true;
+        }
+
+        if (Math.abs(enemyCy - playerCy) <= 8) {
+            int y = enemyCy / TILE_SIZE;
+            int x1 = Math.min(enemyCx, playerCx) / TILE_SIZE;
+            int x2 = Math.max(enemyCx, playerCx) / TILE_SIZE;
+            for (int x = x1; x <= x2; x++) {
+                if (map[y][x] != 0) return false;
+            }
+            return true;
+        }
+
+        return false;
     }
 
     private boolean moveTank(Tank t, int dx, int dy) {
