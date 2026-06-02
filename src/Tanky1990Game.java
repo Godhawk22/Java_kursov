@@ -207,6 +207,8 @@ public class Tanky1990Game extends JPanel {
     }
 
     private boolean hitEnemies(Bullet bullet) {
+        if (bullet.owner instanceof Enemy) return false;
+
         for (int i = 0; i < enemies.size(); i++) {
             Enemy enemy = enemies.get(i);
             if (bullet.owner == enemy) continue;
@@ -388,8 +390,8 @@ public class Tanky1990Game extends JPanel {
         drawTank(g2, playerTwo, GameConfig.PLAYER_TWO_COLOR);
         for (Enemy e : enemies) drawTank(g2, e, GameConfig.ENEMY_COLOR);
 
-        g2.setColor(GameConfig.BULLET_COLOR);
         for (Bullet b : bullets) {
+            g2.setColor(b.owner instanceof Enemy ? GameConfig.ENEMY_BULLET_COLOR : GameConfig.BULLET_COLOR);
             g2.fillOval(b.x - GameConfig.BULLET_RADIUS, b.y - GameConfig.BULLET_RADIUS,
                     GameConfig.BULLET_RADIUS * 2, GameConfig.BULLET_RADIUS * 2);
         }

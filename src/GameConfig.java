@@ -90,8 +90,10 @@ public final class GameConfig {
     public static final int BULLET_SPEED = 3;
     // Радиус пули в пикселях.
     public static final int BULLET_RADIUS = 3;
-    // Цвет пули.
+    // Цвет пули игрока.
     public static final Color BULLET_COLOR = Color.YELLOW;
+    // Цвет пули вражеского бота.
+    public static final Color ENEMY_BULLET_COLOR = Color.ORANGE;
 
     // Заглушка пути к JPG-текстуре танка игрока.
     public static final String PLAYER_TEXTURE_JPG = "assets/textures/player_tank.jpg";
