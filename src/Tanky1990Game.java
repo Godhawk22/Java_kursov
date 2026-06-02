@@ -16,8 +16,8 @@ public class Tanky1990Game extends JPanel {
     private static final int TILE_SIZE = 32;
     // Ширина карты в клетках.
     private static final int MAP_W = 20;
-    // Высота карты в клетках.
-    private static final int MAP_H = 15;
+    // Высота карты в клетках: поле увеличено в два раза по сравнению с базовой версией.
+    private static final int MAP_H = 30;
     // Ширина окна и игрового поля в пикселях.
     private static final int WIDTH = MAP_W * TILE_SIZE;
     // Высота окна и игрового поля в пикселях.
@@ -35,6 +35,8 @@ public class Tanky1990Game extends JPanel {
     private static final int BRICK_DAMAGE_STEP = TILE_SIZE / BRICK_MAX_HEALTH;
     // Шанс случайного появления кирпича в каждой внутренней клетке карты.
     private static final float BRICK_SPAWN_CHANCE = 0.15f;
+    // Шанс случайного появления стального блока в каждой внутренней клетке карты.
+    private static final float STEEL_SPAWN_CHANCE = 0.04f;
     // Первая клетка безопасной зоны спавна игрока по оси X.
     private static final int PLAYER_SAFE_AREA_X1 = 1;
     // Последняя клетка безопасной зоны спавна игрока по оси X (не включительно).
@@ -46,6 +48,10 @@ public class Tanky1990Game extends JPanel {
     private static final int PLAYER_START_TILE_X = 2;
     // Стартовая клетка игрока по оси Y.
     private static final int PLAYER_START_TILE_Y = MAP_H - 2;
+    // Размер танка игрока: уменьшен на 25% относительно клетки 32x32.
+    private static final int PLAYER_TANK_SIZE = TILE_SIZE * 3 / 4;
+    // Радиус стального ограждения вокруг спавна игрока в клетках.
+    private static final int PLAYER_SPAWN_WALL_RADIUS = 2;
     // Скорость движения игрока в пикселях за шаг игрового цикла.
     private static final int PLAYER_SPEED = 2;
     // Начальное количество жизней игрока.
@@ -55,6 +61,12 @@ public class Tanky1990Game extends JPanel {
     // Цвет корпуса танка игрока.
     private static final Color PLAYER_COLOR = new Color(55, 180, 80);
 
+    // Размер танка врага в пикселях.
+    private static final int ENEMY_TANK_SIZE = TILE_SIZE;
+    // Стартовая строка спавна врагов в клетках.
+    private static final int ENEMY_SPAWN_TILE_Y = 1;
+    // Радиус нижнего стального ограждения спавна врагов в клетках.
+    private static final int ENEMY_SPAWN_WALL_RADIUS = 1;
     // Количество врагов при новой игре или сбросе.
     private static final int INITIAL_ENEMY_COUNT = 2;
     // Максимальное количество врагов на карте одновременно.
@@ -88,6 +100,21 @@ public class Tanky1990Game extends JPanel {
     private static final int BULLET_RADIUS = 3;
     // Цвет пули.
     private static final Color BULLET_COLOR = Color.YELLOW;
+
+    // Заглушка пути к JPG-текстуре танка игрока.
+    private static final String PLAYER_TEXTURE_JPG = "assets/textures/player_tank.jpg";
+    // Заглушка пути к BMP-текстуре танка игрока.
+    private static final String PLAYER_TEXTURE_BMP = "assets/textures/player_tank.bmp";
+    // Заглушка пути к JPG-текстуре вражеского танка.
+    private static final String ENEMY_TEXTURE_JPG = "assets/textures/enemy_tank.jpg";
+    // Заглушка пути к BMP-текстуре вражеского танка.
+    private static final String ENEMY_TEXTURE_BMP = "assets/textures/enemy_tank.bmp";
+    // Заглушка пути к JPG-текстуре кирпичной стены.
+    private static final String BRICK_TEXTURE_JPG = "assets/textures/brick_wall.jpg";
+    // Заглушка пути к BMP-текстуре стальной стены.
+    private static final String STEEL_TEXTURE_BMP = "assets/textures/steel_wall.bmp";
+    // Заглушка пути к JPG-текстуре пули.
+    private static final String BULLET_TEXTURE_JPG = "assets/textures/bullet.jpg";
 
     // Цвет кирпичной стены.
     private static final Color BRICK_COLOR = new Color(178, 87, 34);
@@ -130,7 +157,8 @@ public class Tanky1990Game extends JPanel {
         setFocusable(true);
         initMap();
 
-        player = new Tank(PLAYER_START_TILE_X * TILE_SIZE, PLAYER_START_TILE_Y * TILE_SIZE, Direction.UP, true);
+        player = new Tank(tileToCenteredPixel(PLAYER_START_TILE_X, PLAYER_TANK_SIZE),
+                tileToCenteredPixel(PLAYER_START_TILE_Y, PLAYER_TANK_SIZE), Direction.UP, true);
         spawnInitialEnemies();
 
         setupControls();
@@ -200,38 +228,134 @@ public class Tanky1990Game extends JPanel {
         });
     }
 
+    private void setEmptyCell(int x, int y) {
+        map[y][x] = CELL_EMPTY;
+        brickBounds[y][x] = null;
+    }
+
+    private void setSteelCell(int x, int y) {
+        if (!isInsideMap(x, y)) return;
+        map[y][x] = CELL_STEEL;
+        brickBounds[y][x] = null;
+    }
+
+    private void setBrickCell(int x, int y) {
+        map[y][x] = BRICK_MAX_HEALTH;
+        brickBounds[y][x] = new Rectangle(0, 0, TILE_SIZE, TILE_SIZE);
+    }
+
+    private boolean isInsideMap(int x, int y) {
+        return x >= 0 && y >= 0 && x < MAP_W && y < MAP_H;
+    }
+
+    private int tileToCenteredPixel(int tile, int size) {
+        return tile * TILE_SIZE + (TILE_SIZE - size) / 2;
+    }
+
+    private int tankSize(Tank tank) {
+        return tank.isPlayer ? PLAYER_TANK_SIZE : ENEMY_TANK_SIZE;
+    }
+
+    private Rectangle tankBounds(Tank tank) {
+        int size = tankSize(tank);
+        return new Rectangle(tank.x, tank.y, size, size);
+    }
+
+    private boolean isReservedSpawnArea(int x, int y) {
+        if (Math.abs(x - PLAYER_START_TILE_X) <= PLAYER_SPAWN_WALL_RADIUS
+                && Math.abs(y - PLAYER_START_TILE_Y) <= PLAYER_SPAWN_WALL_RADIUS) {
+            return true;
+        }
+
+        for (int lane : ENEMY_SPAWN_LANES) {
+            if (Math.abs(x - lane) <= ENEMY_SPAWN_WALL_RADIUS
+                    && y >= ENEMY_SPAWN_TILE_Y
+                    && y <= ENEMY_SPAWN_TILE_Y + ENEMY_SPAWN_WALL_RADIUS) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void clearEnemySpawnAreas() {
+        for (int lane : ENEMY_SPAWN_LANES) {
+            for (int x = lane - ENEMY_SPAWN_WALL_RADIUS; x <= lane + ENEMY_SPAWN_WALL_RADIUS; x++) {
+                setEmptyCell(x, ENEMY_SPAWN_TILE_Y);
+            }
+        }
+    }
+
+    private void buildEnemySpawnWalls() {
+        int wallY = ENEMY_SPAWN_TILE_Y + 1;
+        for (int lane : ENEMY_SPAWN_LANES) {
+            for (int x = lane - ENEMY_SPAWN_WALL_RADIUS; x <= lane + ENEMY_SPAWN_WALL_RADIUS; x++) {
+                setSteelCell(x, wallY);
+            }
+        }
+    }
+
+    private void clearPlayerSafeArea() {
+        for (int y = MAP_H - PLAYER_SAFE_AREA_BOTTOM_OFFSET; y < MAP_H - 1; y++) {
+            for (int x = PLAYER_SAFE_AREA_X1; x < PLAYER_SAFE_AREA_X2; x++) {
+                setEmptyCell(x, y);
+            }
+        }
+    }
+
+    private void buildPlayerSpawnWalls() {
+        for (int y = PLAYER_START_TILE_Y - PLAYER_SPAWN_WALL_RADIUS;
+             y <= PLAYER_START_TILE_Y + PLAYER_SPAWN_WALL_RADIUS; y++) {
+            for (int x = PLAYER_START_TILE_X - PLAYER_SPAWN_WALL_RADIUS;
+                 x <= PLAYER_START_TILE_X + PLAYER_SPAWN_WALL_RADIUS; x++) {
+                if (!isInsideMap(x, y)) continue;
+
+                boolean perimeter = Math.abs(x - PLAYER_START_TILE_X) == PLAYER_SPAWN_WALL_RADIUS
+                        || Math.abs(y - PLAYER_START_TILE_Y) == PLAYER_SPAWN_WALL_RADIUS;
+                boolean exitGate = x == PLAYER_START_TILE_X && y == PLAYER_START_TILE_Y - PLAYER_SPAWN_WALL_RADIUS;
+                if (perimeter && !exitGate) {
+                    setSteelCell(x, y);
+                } else {
+                    setEmptyCell(x, y);
+                }
+            }
+        }
+    }
+
     private void initMap() {
         for (int y = 0; y < MAP_H; y++) {
             for (int x = 0; x < MAP_W; x++) {
-                map[y][x] = CELL_EMPTY;
-                brickBounds[y][x] = null;
+                setEmptyCell(x, y);
             }
         }
 
         for (int x = 0; x < MAP_W; x++) {
-            map[0][x] = CELL_STEEL;
-            map[MAP_H - 1][x] = CELL_STEEL;
+            setSteelCell(x, 0);
+            setSteelCell(x, MAP_H - 1);
         }
         for (int y = 0; y < MAP_H; y++) {
-            map[y][0] = CELL_STEEL;
-            map[y][MAP_W - 1] = CELL_STEEL;
+            setSteelCell(0, y);
+            setSteelCell(MAP_W - 1, y);
         }
 
         for (int y = 2; y < MAP_H - 2; y++) {
             for (int x = 2; x < MAP_W - 2; x++) {
-                if (random.nextFloat() < BRICK_SPAWN_CHANCE) {
-                    map[y][x] = BRICK_MAX_HEALTH;
-                    brickBounds[y][x] = new Rectangle(0, 0, TILE_SIZE, TILE_SIZE);
+                if (isReservedSpawnArea(x, y)) {
+                    continue;
+                }
+
+                float roll = random.nextFloat();
+                if (roll < STEEL_SPAWN_CHANCE) {
+                    setSteelCell(x, y);
+                } else if (roll < STEEL_SPAWN_CHANCE + BRICK_SPAWN_CHANCE) {
+                    setBrickCell(x, y);
                 }
             }
         }
 
-        for (int y = MAP_H - PLAYER_SAFE_AREA_BOTTOM_OFFSET; y < MAP_H - 1; y++) {
-            for (int x = PLAYER_SAFE_AREA_X1; x < PLAYER_SAFE_AREA_X2; x++) {
-                map[y][x] = CELL_EMPTY;
-                brickBounds[y][x] = null;
-            }
-        }
+        clearEnemySpawnAreas();
+        buildEnemySpawnWalls();
+        clearPlayerSafeArea();
+        buildPlayerSpawnWalls();
     }
 
     private void gameLoop(ActionEvent ignored) {
@@ -351,8 +475,7 @@ public class Tanky1990Game extends JPanel {
     }
 
     private boolean hitTank(Bullet b, Tank t) {
-        Rectangle r = new Rectangle(t.x, t.y, TILE_SIZE, TILE_SIZE);
-        return r.contains(b.x, b.y);
+        return tankBounds(t).contains(b.x, b.y);
     }
 
     private void maybeSpawnEnemy() {
@@ -373,7 +496,7 @@ public class Tanky1990Game extends JPanel {
         for (int i = 0; i < ENEMY_SPAWN_RETRIES; i++) {
             int lane = ENEMY_SPAWN_LANES[random.nextInt(ENEMY_SPAWN_LANES.length)];
             int x = lane * TILE_SIZE;
-            int y = TILE_SIZE;
+            int y = ENEMY_SPAWN_TILE_Y * TILE_SIZE;
             if (canSpawnAt(x, y)) {
                 enemies.add(new Tank(x, y, Direction.DOWN, false));
                 return;
@@ -382,10 +505,10 @@ public class Tanky1990Game extends JPanel {
     }
 
     private boolean canSpawnAt(int x, int y) {
-        Rectangle spawn = new Rectangle(x, y, TILE_SIZE, TILE_SIZE);
-        if (new Rectangle(player.x, player.y, TILE_SIZE, TILE_SIZE).intersects(spawn)) return false;
+        Rectangle spawn = new Rectangle(x, y, ENEMY_TANK_SIZE, ENEMY_TANK_SIZE);
+        if (tankBounds(player).intersects(spawn)) return false;
         for (Tank e : enemies) {
-            if (new Rectangle(e.x, e.y, TILE_SIZE, TILE_SIZE).intersects(spawn)) return false;
+            if (tankBounds(e).intersects(spawn)) return false;
         }
         return true;
     }
@@ -400,10 +523,10 @@ public class Tanky1990Game extends JPanel {
     }
 
     private boolean enemySeesPlayer(Tank enemy) {
-        int enemyCx = enemy.x + TILE_SIZE / 2;
-        int enemyCy = enemy.y + TILE_SIZE / 2;
-        int playerCx = player.x + TILE_SIZE / 2;
-        int playerCy = player.y + TILE_SIZE / 2;
+        int enemyCx = enemy.x + tankSize(enemy) / 2;
+        int enemyCy = enemy.y + tankSize(enemy) / 2;
+        int playerCx = player.x + tankSize(player) / 2;
+        int playerCy = player.y + tankSize(player) / 2;
 
         if (Math.abs(enemyCx - playerCx) <= ENEMY_SIGHT_TOLERANCE) {
             for (int y = Math.min(enemyCy, playerCy); y <= Math.max(enemyCy, playerCy); y += BULLET_SPEED) {
@@ -436,15 +559,16 @@ public class Tanky1990Game extends JPanel {
         int nx = t.x + dx;
         int ny = t.y + dy;
 
-        Rectangle next = new Rectangle(nx, ny, TILE_SIZE, TILE_SIZE);
-        if (nx < TILE_SIZE || ny < TILE_SIZE || nx + TILE_SIZE >= WIDTH - TILE_SIZE || ny + TILE_SIZE >= HEIGHT - TILE_SIZE) {
+        int size = tankSize(t);
+        Rectangle next = new Rectangle(nx, ny, size, size);
+        if (nx < TILE_SIZE || ny < TILE_SIZE || nx + size >= WIDTH - TILE_SIZE || ny + size >= HEIGHT - TILE_SIZE) {
             return false;
         }
 
         int left = next.x / TILE_SIZE;
-        int right = (next.x + TILE_SIZE - 1) / TILE_SIZE;
+        int right = (next.x + size - 1) / TILE_SIZE;
         int top = next.y / TILE_SIZE;
-        int bottom = (next.y + TILE_SIZE - 1) / TILE_SIZE;
+        int bottom = (next.y + size - 1) / TILE_SIZE;
 
         for (int y = top; y <= bottom; y++) {
             for (int x = left; x <= right; x++) {
@@ -455,12 +579,12 @@ public class Tanky1990Game extends JPanel {
 
         if (t.isPlayer) {
             for (Tank e : enemies) {
-                if (new Rectangle(e.x, e.y, TILE_SIZE, TILE_SIZE).intersects(next)) return false;
+                if (tankBounds(e).intersects(next)) return false;
             }
         } else {
-            if (new Rectangle(player.x, player.y, TILE_SIZE, TILE_SIZE).intersects(next)) return false;
+            if (tankBounds(player).intersects(next)) return false;
             for (Tank e : enemies) {
-                if (e != t && new Rectangle(e.x, e.y, TILE_SIZE, TILE_SIZE).intersects(next)) return false;
+                if (e != t && tankBounds(e).intersects(next)) return false;
             }
         }
 
@@ -471,8 +595,9 @@ public class Tanky1990Game extends JPanel {
 
     private void shoot(Tank t) {
         if (t.reload > 0) return;
-        int bx = t.x + TILE_SIZE / 2;
-        int by = t.y + TILE_SIZE / 2;
+        int size = tankSize(t);
+        int bx = t.x + size / 2;
+        int by = t.y + size / 2;
         int dx = 0, dy = 0;
         switch (t.direction) {
             case UP -> {
@@ -480,7 +605,7 @@ public class Tanky1990Game extends JPanel {
                 dy = -BULLET_SPEED;
             }
             case DOWN -> {
-                by = t.y + TILE_SIZE;
+                by = t.y + size;
                 dy = BULLET_SPEED;
             }
             case LEFT -> {
@@ -488,7 +613,7 @@ public class Tanky1990Game extends JPanel {
                 dx = -BULLET_SPEED;
             }
             case RIGHT -> {
-                bx = t.x + TILE_SIZE;
+                bx = t.x + size;
                 dx = BULLET_SPEED;
             }
         }
@@ -505,8 +630,8 @@ public class Tanky1990Game extends JPanel {
         bullets.clear();
         enemies.clear();
         initMap();
-        player.x = PLAYER_START_TILE_X * TILE_SIZE;
-        player.y = PLAYER_START_TILE_Y * TILE_SIZE;
+        player.x = tileToCenteredPixel(PLAYER_START_TILE_X, PLAYER_TANK_SIZE);
+        player.y = tileToCenteredPixel(PLAYER_START_TILE_Y, PLAYER_TANK_SIZE);
         player.direction = Direction.UP;
         player.reload = 0;
         enemySpawnTimer = 0;
@@ -640,15 +765,20 @@ public class Tanky1990Game extends JPanel {
     private void drawTank(Graphics2D g2, Tank t, Color body) {
         int x = t.x;
         int y = t.y;
+        int size = tankSize(t);
+        int padding = Math.max(3, size / 8);
+        int barrelWidth = Math.max(4, size / 5);
+        int barrelLength = Math.max(12, size / 2);
+
         g2.setColor(body);
-        g2.fillRect(x + 4, y + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+        g2.fillRect(x + padding, y + padding, size - padding * 2, size - padding * 2);
 
         g2.setColor(body.darker());
         switch (t.direction) {
-            case UP -> g2.fillRect(x + TILE_SIZE / 2 - 3, y - 6, 6, 18);
-            case DOWN -> g2.fillRect(x + TILE_SIZE / 2 - 3, y + TILE_SIZE - 12, 6, 18);
-            case LEFT -> g2.fillRect(x - 6, y + TILE_SIZE / 2 - 3, 18, 6);
-            case RIGHT -> g2.fillRect(x + TILE_SIZE - 12, y + TILE_SIZE / 2 - 3, 18, 6);
+            case UP -> g2.fillRect(x + size / 2 - barrelWidth / 2, y - barrelLength / 3, barrelWidth, barrelLength);
+            case DOWN -> g2.fillRect(x + size / 2 - barrelWidth / 2, y + size - barrelLength * 2 / 3, barrelWidth, barrelLength);
+            case LEFT -> g2.fillRect(x - barrelLength / 3, y + size / 2 - barrelWidth / 2, barrelLength, barrelWidth);
+            case RIGHT -> g2.fillRect(x + size - barrelLength * 2 / 3, y + size / 2 - barrelWidth / 2, barrelLength, barrelWidth);
         }
     }
 
