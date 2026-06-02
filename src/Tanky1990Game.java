@@ -17,17 +17,11 @@ public class Tanky1990Game extends JPanel {
     private final List<Bullet> bullets = new ArrayList<>();
     private final boolean[] keys = new boolean[256];
     private final Random random = new Random();
-    private final boolean localMultiplayer;
 
     private int enemySpawnTimer = 0;
     private boolean gameOver = false;
 
     public Tanky1990Game() {
-        this(false);
-    }
-
-    public Tanky1990Game(boolean localMultiplayer) {
-        this.localMultiplayer = localMultiplayer;
         setPreferredSize(new Dimension(GameConfig.WIDTH, GameConfig.HEIGHT));
         setBackground(Color.BLACK);
         setFocusable(true);
@@ -36,11 +30,9 @@ public class Tanky1990Game extends JPanel {
         map.init();
 
         playerOne = new Player(1, GameConfig.PLAYER_START_TILE_X, GameConfig.PLAYER_START_TILE_Y);
-        playerTwo = localMultiplayer
-                ? new Player(2, GameConfig.PLAYER_TWO_START_TILE_X, GameConfig.PLAYER_TWO_START_TILE_Y)
-                : null;
+        playerTwo = new Player(2, GameConfig.PLAYER_TWO_START_TILE_X, GameConfig.PLAYER_TWO_START_TILE_Y);
         players.add(playerOne);
-        if (playerTwo != null) players.add(playerTwo);
+        players.add(playerTwo);
 
         spawnInitialEnemies();
         setupControls();
@@ -80,7 +72,7 @@ public class Tanky1990Game extends JPanel {
         actionMap.put("shoot_p2", new AbstractAction() {
             @Override
             public void actionPerformed(ActionEvent e) {
-                if (!gameOver && playerTwo != null) shoot(playerTwo);
+                if (!gameOver) shoot(playerTwo);
             }
         });
 
@@ -130,11 +122,7 @@ public class Tanky1990Game extends JPanel {
 
     private void handlePlayersInput() {
         handlePlayerInput(playerOne, KeyEvent.VK_W, KeyEvent.VK_S, KeyEvent.VK_A, KeyEvent.VK_D);
-        if (playerTwo != null) {
-            handlePlayerInput(playerTwo, KeyEvent.VK_UP, KeyEvent.VK_DOWN, KeyEvent.VK_LEFT, KeyEvent.VK_RIGHT);
-        } else {
-            handlePlayerInput(playerOne, KeyEvent.VK_UP, KeyEvent.VK_DOWN, KeyEvent.VK_LEFT, KeyEvent.VK_RIGHT);
-        }
+        handlePlayerInput(playerTwo, KeyEvent.VK_UP, KeyEvent.VK_DOWN, KeyEvent.VK_LEFT, KeyEvent.VK_RIGHT);
     }
 
     private void handlePlayerInput(Player player, int up, int down, int left, int right) {
@@ -368,8 +356,6 @@ public class Tanky1990Game extends JPanel {
         }
         bullets.add(new Bullet(bx, by, dx, dy, tank));
         tank.reload = tank instanceof Enemy ? GameConfig.ENEMY_RELOAD_TICKS : GameConfig.PLAYER_RELOAD_TICKS;
-        System.out.printf("SHOT: %s direction=%s bullet=(%d,%d) tank=(%d,%d)%n",
-                tank instanceof Enemy ? "bot" : "player", tank.direction, bx, by, tank.x, tank.y);
     }
 
     private void resetGame() {
@@ -378,9 +364,7 @@ public class Tanky1990Game extends JPanel {
         enemies.clear();
         map.init();
         playerOne.resetToSpawn(GameConfig.PLAYER_START_TILE_X, GameConfig.PLAYER_START_TILE_Y);
-        if (playerTwo != null) {
-            playerTwo.resetToSpawn(GameConfig.PLAYER_TWO_START_TILE_X, GameConfig.PLAYER_TWO_START_TILE_Y);
-        }
+        playerTwo.resetToSpawn(GameConfig.PLAYER_TWO_START_TILE_X, GameConfig.PLAYER_TWO_START_TILE_Y);
         enemySpawnTimer = 0;
         spawnInitialEnemies();
     }
@@ -401,7 +385,7 @@ public class Tanky1990Game extends JPanel {
 
         map.draw(g2);
         drawTank(g2, playerOne, GameConfig.PLAYER_COLOR);
-        if (playerTwo != null) drawTank(g2, playerTwo, GameConfig.PLAYER_TWO_COLOR);
+        drawTank(g2, playerTwo, GameConfig.PLAYER_TWO_COLOR);
         for (Enemy e : enemies) drawTank(g2, e, GameConfig.ENEMY_COLOR);
 
         g2.setColor(GameConfig.BULLET_COLOR);
@@ -423,9 +407,6 @@ public class Tanky1990Game extends JPanel {
     }
 
     private String hudText() {
-        if (playerTwo == null) {
-            return "P1 Score: " + playerOne.score + "   Lives: " + playerOne.lives + "   R - restart";
-        }
         return "P1 Lives: " + playerOne.lives + " Score: " + playerOne.score
                 + "   P2 Lives: " + playerTwo.lives + " Score: " + playerTwo.score + "   R - restart";
     }
