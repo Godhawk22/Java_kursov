@@ -1,123 +1,147 @@
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
-import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
 
+/** Главная игровая панель: цикл матча, ввод, танки, пули и отрисовка. */
 public class Tanky1990Game extends JPanel {
-    private static final int TILE_SIZE = 32;
-    private static final int MAP_W = 20;
-    private static final int MAP_H = 15;
-    private static final int WIDTH = MAP_W * TILE_SIZE;
-    private static final int HEIGHT = MAP_H * TILE_SIZE;
-
-    private final int[][] map = new int[MAP_H][MAP_W]; // 0-empty,1-brick,2-steel
-    private final Tank player;
-    private final List<Tank> enemies = new ArrayList<>();
+    private final GameMap map;
+    private final Player playerOne;
+    private final Player playerTwo;
+    private final List<Player> players = new ArrayList<>();
+    private final List<Enemy> enemies = new ArrayList<>();
     private final List<Bullet> bullets = new ArrayList<>();
     private final boolean[] keys = new boolean[256];
     private final Random random = new Random();
 
     private int enemySpawnTimer = 0;
-    private int score = 0;
-    private int lives = 3;
     private boolean gameOver = false;
 
     public Tanky1990Game() {
-        setPreferredSize(new Dimension(WIDTH, HEIGHT));
+        setPreferredSize(new Dimension(GameConfig.WIDTH, GameConfig.HEIGHT));
         setBackground(Color.BLACK);
         setFocusable(true);
-        initMap();
 
-        player = new Tank(2 * TILE_SIZE, (MAP_H - 2) * TILE_SIZE, Direction.UP, true);
-        spawnEnemy();
-        spawnEnemy();
+        map = new GameMap(random);
+        map.init();
 
-        addKeyListener(new KeyAdapter() {
-            @Override
-            public void keyPressed(KeyEvent e) {
-                int k = e.getKeyCode();
-                if (k < keys.length) keys[k] = true;
-                if (k == KeyEvent.VK_SPACE && !gameOver) {
-                    shoot(player);
-                }
-                if (k == KeyEvent.VK_R && gameOver) {
-                    resetGame();
-                }
-            }
+        playerOne = new Player(1, GameConfig.PLAYER_START_TILE_X, GameConfig.PLAYER_START_TILE_Y);
+        playerTwo = new Player(2, GameConfig.PLAYER_TWO_START_TILE_X, GameConfig.PLAYER_TWO_START_TILE_Y);
+        players.add(playerOne);
+        players.add(playerTwo);
 
-            @Override
-            public void keyReleased(KeyEvent e) {
-                int k = e.getKeyCode();
-                if (k < keys.length) keys[k] = false;
-            }
-        });
+        spawnInitialEnemies();
+        setupControls();
 
-        Timer timer = new Timer(16, this::gameLoop);
+        Timer timer = new Timer(GameConfig.TIMER_DELAY_MS, this::gameLoop);
         timer.start();
     }
 
-    private void initMap() {
-        for (int y = 0; y < MAP_H; y++) {
-            for (int x = 0; x < MAP_W; x++) {
-                map[y][x] = 0;
-            }
-        }
+    @Override
+    public void addNotify() {
+        super.addNotify();
+        requestFocusInWindow();
+    }
 
-        for (int x = 0; x < MAP_W; x++) {
-            map[0][x] = 2;
-            map[MAP_H - 1][x] = 2;
-        }
-        for (int y = 0; y < MAP_H; y++) {
-            map[y][0] = 2;
-            map[y][MAP_W - 1] = 2;
-        }
+    private void setupControls() {
+        bindMovementKey(KeyEvent.VK_W);
+        bindMovementKey(KeyEvent.VK_A);
+        bindMovementKey(KeyEvent.VK_S);
+        bindMovementKey(KeyEvent.VK_D);
+        bindMovementKey(KeyEvent.VK_UP);
+        bindMovementKey(KeyEvent.VK_DOWN);
+        bindMovementKey(KeyEvent.VK_LEFT);
+        bindMovementKey(KeyEvent.VK_RIGHT);
 
-        for (int y = 2; y < MAP_H - 2; y++) {
-            for (int x = 2; x < MAP_W - 2; x++) {
-                if (random.nextFloat() < 0.15f) {
-                    map[y][x] = 1;
-                }
-            }
-        }
+        InputMap inputMap = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+        ActionMap actionMap = getActionMap();
 
-        for (int y = MAP_H - 3; y < MAP_H - 1; y++) {
-            for (int x = 1; x < 5; x++) {
-                map[y][x] = 0;
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_SPACE, 0), "shoot_p1");
+        actionMap.put("shoot_p1", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                if (!gameOver) shoot(playerOne);
             }
-        }
+        });
+
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "shoot_p2");
+        actionMap.put("shoot_p2", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                if (!gameOver) shoot(playerTwo);
+            }
+        });
+
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_R, 0), "reset");
+        actionMap.put("reset", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                resetGame();
+            }
+        });
+    }
+
+    private void bindMovementKey(int keyCode) {
+        InputMap inputMap = getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+        ActionMap actionMap = getActionMap();
+        String pressedName = "pressed_" + keyCode;
+        String releasedName = "released_" + keyCode;
+
+        inputMap.put(KeyStroke.getKeyStroke(keyCode, 0, false), pressedName);
+        actionMap.put(pressedName, new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                keys[keyCode] = true;
+            }
+        });
+
+        inputMap.put(KeyStroke.getKeyStroke(keyCode, 0, true), releasedName);
+        actionMap.put(releasedName, new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                keys[keyCode] = false;
+            }
+        });
     }
 
     private void gameLoop(ActionEvent ignored) {
         if (!gameOver) {
-            handleInput();
+            handlePlayersInput();
             updateEnemies();
             updateBullets();
             maybeSpawnEnemy();
+            updateReloads();
+            gameOver = players.stream().noneMatch(Player::isAlive);
         }
         repaint();
     }
 
-    private void handleInput() {
+    private void handlePlayersInput() {
+        handlePlayerInput(playerOne, KeyEvent.VK_W, KeyEvent.VK_S, KeyEvent.VK_A, KeyEvent.VK_D);
+        handlePlayerInput(playerTwo, KeyEvent.VK_UP, KeyEvent.VK_DOWN, KeyEvent.VK_LEFT, KeyEvent.VK_RIGHT);
+    }
+
+    private void handlePlayerInput(Player player, int up, int down, int left, int right) {
+        if (!player.isAlive()) return;
         int dx = 0;
         int dy = 0;
         Direction dir = player.direction;
 
-        if (keys[KeyEvent.VK_UP] || keys[KeyEvent.VK_W]) {
-            dy = -2;
+        if (keys[up]) {
+            dy = -GameConfig.PLAYER_SPEED;
             dir = Direction.UP;
-        } else if (keys[KeyEvent.VK_DOWN] || keys[KeyEvent.VK_S]) {
-            dy = 2;
+        } else if (keys[down]) {
+            dy = GameConfig.PLAYER_SPEED;
             dir = Direction.DOWN;
-        } else if (keys[KeyEvent.VK_LEFT] || keys[KeyEvent.VK_A]) {
-            dx = -2;
+        } else if (keys[left]) {
+            dx = -GameConfig.PLAYER_SPEED;
             dir = Direction.LEFT;
-        } else if (keys[KeyEvent.VK_RIGHT] || keys[KeyEvent.VK_D]) {
-            dx = 2;
+        } else if (keys[right]) {
+            dx = GameConfig.PLAYER_SPEED;
             dir = Direction.RIGHT;
         }
 
@@ -126,26 +150,28 @@ public class Tanky1990Game extends JPanel {
     }
 
     private void updateEnemies() {
-        for (Tank enemy : enemies) {
+        for (Enemy enemy : enemies) {
+            Player target = nearestAlivePlayer(enemy);
+            if (target != null && enemySeesTank(enemy, target)) {
+                enemy.direction = directionToTarget(enemy, target);
+                if (enemy.reload == 0) shoot(enemy);
+                continue;
+            }
+
             enemy.aiTimer--;
             if (enemy.aiTimer <= 0) {
-                enemy.aiTimer = 20 + random.nextInt(40);
-                enemy.direction = Direction.values()[random.nextInt(4)];
-                if (random.nextFloat() < 0.25f) shoot(enemy);
+                enemy.aiTimer = GameConfig.ENEMY_AI_MIN_TICKS + random.nextInt(GameConfig.ENEMY_AI_RANDOM_TICKS);
+                enemy.direction = Direction.values()[random.nextInt(Direction.values().length)];
+                if (random.nextFloat() < GameConfig.ENEMY_RANDOM_SHOT_CHANCE) shoot(enemy);
             }
 
-            int dx = 0;
-            int dy = 0;
-            switch (enemy.direction) {
-                case UP -> dy = -1;
-                case DOWN -> dy = 1;
-                case LEFT -> dx = -1;
-                case RIGHT -> dx = 1;
-            }
-
-            boolean moved = moveTank(enemy, dx, dy);
-            if (!moved) {
-                enemy.direction = Direction.values()[random.nextInt(4)];
+            int[] step = stepForDirection(enemy.direction, GameConfig.ENEMY_SPEED);
+            if (!moveTank(enemy, step[0], step[1])) {
+                if (target != null) enemy.direction = directionToTarget(enemy, target);
+                step = stepForDirection(enemy.direction, GameConfig.ENEMY_SPEED);
+                if (!moveTank(enemy, step[0], step[1])) {
+                    enemy.direction = Direction.values()[random.nextInt(Direction.values().length)];
+                }
             }
         }
     }
@@ -157,136 +183,201 @@ public class Tanky1990Game extends JPanel {
             b.x += b.dx;
             b.y += b.dy;
 
-            if (b.x < 0 || b.y < 0 || b.x >= WIDTH || b.y >= HEIGHT) {
+            if (map.hitWall(b)) {
                 it.remove();
                 continue;
             }
 
-            int tx = b.x / TILE_SIZE;
-            int ty = b.y / TILE_SIZE;
-            if (map[ty][tx] == 1) {
-                map[ty][tx] = 0;
-                it.remove();
-                continue;
-            }
-            if (map[ty][tx] == 2) {
-                it.remove();
-                continue;
-            }
-
-            if (hitTank(b, player)) {
-                if (!b.fromPlayer) {
-                    lives--;
-                    if (lives <= 0) gameOver = true;
-                    player.x = 2 * TILE_SIZE;
-                    player.y = (MAP_H - 2) * TILE_SIZE;
-                }
-                it.remove();
-                continue;
-            }
-
-            boolean enemyHit = false;
-            for (int i = 0; i < enemies.size(); i++) {
-                Tank e = enemies.get(i);
-                if (hitTank(b, e)) {
-                    if (b.fromPlayer) {
-                        enemies.remove(i);
-                        score += 100;
-                    }
-                    enemyHit = true;
-                    break;
-                }
-            }
-            if (enemyHit) {
+            if (hitPlayers(b) || hitEnemies(b)) {
                 it.remove();
             }
         }
     }
 
-    private boolean hitTank(Bullet b, Tank t) {
-        Rectangle r = new Rectangle(t.x, t.y, TILE_SIZE, TILE_SIZE);
-        return r.contains(b.x, b.y);
+    private boolean hitPlayers(Bullet bullet) {
+        for (Player player : players) {
+            if (bullet.owner == player || !player.isAlive()) continue;
+            if (player.bounds().contains(bullet.x, bullet.y)) {
+                player.lives--;
+                if (player.lives > 0) respawnPlayer(player);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hitEnemies(Bullet bullet) {
+        if (bullet.owner instanceof Enemy) return false;
+
+        for (int i = 0; i < enemies.size(); i++) {
+            Enemy enemy = enemies.get(i);
+            if (bullet.owner == enemy) continue;
+            if (enemy.bounds().contains(bullet.x, bullet.y)) {
+                enemies.remove(i);
+                if (bullet.owner instanceof Player owner) {
+                    owner.score += GameConfig.ENEMY_SCORE_REWARD;
+                }
+                return true;
+            }
+        }
+        return false;
     }
 
     private void maybeSpawnEnemy() {
         enemySpawnTimer++;
-        if (enemySpawnTimer >= 180 && enemies.size() < 6) {
+        if (enemySpawnTimer >= GameConfig.ENEMY_SPAWN_INTERVAL_TICKS && enemies.size() < GameConfig.MAX_ENEMIES) {
             enemySpawnTimer = 0;
             spawnEnemy();
         }
     }
 
-    private void spawnEnemy() {
-        int[] lanes = {2, MAP_W / 2, MAP_W - 3};
-        int lane = lanes[random.nextInt(lanes.length)];
-        enemies.add(new Tank(lane * TILE_SIZE, TILE_SIZE, Direction.DOWN, false));
+    private void spawnInitialEnemies() {
+        for (int i = 0; i < GameConfig.INITIAL_ENEMY_COUNT; i++) {
+            spawnEnemy();
+        }
     }
 
-    private boolean moveTank(Tank t, int dx, int dy) {
-        if (dx == 0 && dy == 0) return true;
-        int nx = t.x + dx;
-        int ny = t.y + dy;
-
-        Rectangle next = new Rectangle(nx, ny, TILE_SIZE, TILE_SIZE);
-        if (nx < TILE_SIZE || ny < TILE_SIZE || nx + TILE_SIZE >= WIDTH - TILE_SIZE || ny + TILE_SIZE >= HEIGHT - TILE_SIZE) {
-            return false;
-        }
-
-        int left = next.x / TILE_SIZE;
-        int right = (next.x + TILE_SIZE - 1) / TILE_SIZE;
-        int top = next.y / TILE_SIZE;
-        int bottom = (next.y + TILE_SIZE - 1) / TILE_SIZE;
-
-        for (int y = top; y <= bottom; y++) {
-            for (int x = left; x <= right; x++) {
-                if (map[y][x] != 0) return false;
+    private void spawnEnemy() {
+        for (int i = 0; i < GameConfig.ENEMY_SPAWN_RETRIES; i++) {
+            int lane = GameConfig.ENEMY_SPAWN_LANES[random.nextInt(GameConfig.ENEMY_SPAWN_LANES.length)];
+            int x = lane * GameConfig.TILE_SIZE;
+            int y = GameConfig.ENEMY_SPAWN_TILE_Y * GameConfig.TILE_SIZE;
+            Enemy enemy = new Enemy(x, y);
+            if (canSpawn(enemy)) {
+                enemies.add(enemy);
+                return;
             }
         }
+    }
 
-        if (t.isPlayer) {
-            for (Tank e : enemies) {
-                if (new Rectangle(e.x, e.y, TILE_SIZE, TILE_SIZE).intersects(next)) return false;
-            }
-        } else {
-            if (new Rectangle(player.x, player.y, TILE_SIZE, TILE_SIZE).intersects(next)) return false;
-            for (Tank e : enemies) {
-                if (e != t && new Rectangle(e.x, e.y, TILE_SIZE, TILE_SIZE).intersects(next)) return false;
-            }
+    private boolean canSpawn(Tank tank) {
+        if (map.blocks(tank.bounds())) return false;
+        for (Player player : players) {
+            if (player.isAlive() && player.bounds().intersects(tank.bounds())) return false;
         }
-
-        t.x = nx;
-        t.y = ny;
+        for (Enemy enemy : enemies) {
+            if (enemy.bounds().intersects(tank.bounds())) return false;
+        }
         return true;
     }
 
-    private void shoot(Tank t) {
-        if (t.reload > 0) return;
-        int bx = t.x + TILE_SIZE / 2;
-        int by = t.y + TILE_SIZE / 2;
-        int speed = 6;
-        int dx = 0, dy = 0;
-        switch (t.direction) {
-            case UP -> dy = -speed;
-            case DOWN -> dy = speed;
-            case LEFT -> dx = -speed;
-            case RIGHT -> dx = speed;
+    private Player nearestAlivePlayer(Tank enemy) {
+        Player best = null;
+        int bestDistance = Integer.MAX_VALUE;
+        for (Player player : players) {
+            if (!player.isAlive()) continue;
+            int dx = player.x - enemy.x;
+            int dy = player.y - enemy.y;
+            int distance = dx * dx + dy * dy;
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = player;
+            }
         }
-        bullets.add(new Bullet(bx, by, dx, dy, t.isPlayer));
-        t.reload = t.isPlayer ? 16 : 35;
+        return best;
+    }
+
+    private Direction directionToTarget(Tank source, Tank target) {
+        int dx = target.x - source.x;
+        int dy = target.y - source.y;
+        if (Math.abs(dx) > Math.abs(dy)) return dx < 0 ? Direction.LEFT : Direction.RIGHT;
+        return dy < 0 ? Direction.UP : Direction.DOWN;
+    }
+
+    private boolean enemySeesTank(Tank enemy, Tank target) {
+        int enemyCx = enemy.x + enemy.size / 2;
+        int enemyCy = enemy.y + enemy.size / 2;
+        int targetCx = target.x + target.size / 2;
+        int targetCy = target.y + target.size / 2;
+
+        if (Math.abs(enemyCx - targetCx) <= GameConfig.ENEMY_SIGHT_TOLERANCE) {
+            for (int y = Math.min(enemyCy, targetCy); y <= Math.max(enemyCy, targetCy); y += GameConfig.BULLET_SPEED) {
+                if (map.wallContainsPoint(enemyCx, y)) return false;
+            }
+            return !map.wallContainsPoint(enemyCx, Math.max(enemyCy, targetCy));
+        }
+
+        if (Math.abs(enemyCy - targetCy) <= GameConfig.ENEMY_SIGHT_TOLERANCE) {
+            for (int x = Math.min(enemyCx, targetCx); x <= Math.max(enemyCx, targetCx); x += GameConfig.BULLET_SPEED) {
+                if (map.wallContainsPoint(x, enemyCy)) return false;
+            }
+            return !map.wallContainsPoint(Math.max(enemyCx, targetCx), enemyCy);
+        }
+
+        return false;
+    }
+
+    private int[] stepForDirection(Direction direction, int speed) {
+        return switch (direction) {
+            case UP -> new int[]{0, -speed};
+            case DOWN -> new int[]{0, speed};
+            case LEFT -> new int[]{-speed, 0};
+            case RIGHT -> new int[]{speed, 0};
+        };
+    }
+
+    private boolean moveTank(Tank tank, int dx, int dy) {
+        if (dx == 0 && dy == 0) return true;
+        Rectangle next = new Rectangle(tank.x + dx, tank.y + dy, tank.size, tank.size);
+        if (!map.isInsideTankArea(next) || map.blocks(next)) return false;
+
+        for (Player player : players) {
+            if (player != tank && player.isAlive() && player.bounds().intersects(next)) return false;
+        }
+        for (Enemy enemy : enemies) {
+            if (enemy != tank && enemy.bounds().intersects(next)) return false;
+        }
+
+        tank.x = next.x;
+        tank.y = next.y;
+        return true;
+    }
+
+    private void shoot(Tank tank) {
+        if (tank.reload > 0 || !tank.isAlive()) return;
+        int bx = tank.x + tank.size / 2;
+        int by = tank.y + tank.size / 2;
+        int dx = 0, dy = 0;
+        switch (tank.direction) {
+            case UP -> {
+                by = tank.y - 1;
+                dy = -GameConfig.BULLET_SPEED;
+            }
+            case DOWN -> {
+                by = tank.y + tank.size;
+                dy = GameConfig.BULLET_SPEED;
+            }
+            case LEFT -> {
+                bx = tank.x - 1;
+                dx = -GameConfig.BULLET_SPEED;
+            }
+            case RIGHT -> {
+                bx = tank.x + tank.size;
+                dx = GameConfig.BULLET_SPEED;
+            }
+        }
+        bullets.add(new Bullet(bx, by, dx, dy, tank));
+        tank.reload = tank instanceof Enemy ? GameConfig.ENEMY_RELOAD_TICKS : GameConfig.PLAYER_RELOAD_TICKS;
     }
 
     private void resetGame() {
-        score = 0;
-        lives = 3;
         gameOver = false;
         bullets.clear();
         enemies.clear();
-        initMap();
-        player.x = 2 * TILE_SIZE;
-        player.y = (MAP_H - 2) * TILE_SIZE;
+        map.init();
+        playerOne.resetToSpawn(GameConfig.PLAYER_START_TILE_X, GameConfig.PLAYER_START_TILE_Y);
+        playerTwo.resetToSpawn(GameConfig.PLAYER_TWO_START_TILE_X, GameConfig.PLAYER_TWO_START_TILE_Y);
+        enemySpawnTimer = 0;
+        spawnInitialEnemies();
+    }
+
+    private void respawnPlayer(Player player) {
+        int tileX = player.id == 1 ? GameConfig.PLAYER_START_TILE_X : GameConfig.PLAYER_TWO_START_TILE_X;
+        int tileY = player.id == 1 ? GameConfig.PLAYER_START_TILE_Y : GameConfig.PLAYER_TWO_START_TILE_Y;
+        player.x = GameMap.tileToCenteredPixel(tileX, player.size);
+        player.y = GameMap.tileToCenteredPixel(tileY, player.size);
         player.direction = Direction.UP;
-        spawnEnemy();
-        spawnEnemy();
+        player.reload = 0;
     }
 
     @Override
@@ -294,97 +385,61 @@ public class Tanky1990Game extends JPanel {
         super.paintComponent(g);
         Graphics2D g2 = (Graphics2D) g;
 
-        for (int y = 0; y < MAP_H; y++) {
-            for (int x = 0; x < MAP_W; x++) {
-                int cell = map[y][x];
-                if (cell == 1) {
-                    g2.setColor(new Color(178, 87, 34));
-                    g2.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-                } else if (cell == 2) {
-                    g2.setColor(Color.GRAY);
-                    g2.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-                }
-            }
-        }
+        map.draw(g2);
+        drawTank(g2, playerOne, GameConfig.PLAYER_COLOR);
+        drawTank(g2, playerTwo, GameConfig.PLAYER_TWO_COLOR);
+        for (Enemy e : enemies) drawTank(g2, e, GameConfig.ENEMY_COLOR);
 
-        drawTank(g2, player, new Color(55, 180, 80));
-        for (Tank e : enemies) drawTank(g2, e, new Color(180, 60, 60));
-
-        g2.setColor(Color.YELLOW);
         for (Bullet b : bullets) {
-            g2.fillOval(b.x - 3, b.y - 3, 6, 6);
+            g2.setColor(b.owner instanceof Enemy ? GameConfig.ENEMY_BULLET_COLOR : GameConfig.BULLET_COLOR);
+            g2.fillOval(b.x - GameConfig.BULLET_RADIUS, b.y - GameConfig.BULLET_RADIUS,
+                    GameConfig.BULLET_RADIUS * 2, GameConfig.BULLET_RADIUS * 2);
         }
 
-        g2.setColor(Color.WHITE);
-        g2.drawString("Score: " + score + "   Lives: " + lives + "   R - restart", 12, 18);
+        g2.setColor(GameConfig.HUD_COLOR);
+        g2.drawString(hudText(), 12, 18);
 
         if (gameOver) {
-            g2.setFont(g2.getFont().deriveFont(Font.BOLD, 42f));
+            g2.setFont(g2.getFont().deriveFont(Font.BOLD, GameConfig.GAME_OVER_FONT_SIZE));
             String text = "GAME OVER";
             int w = g2.getFontMetrics().stringWidth(text);
-            g2.setColor(new Color(255, 40, 40));
-            g2.drawString(text, (WIDTH - w) / 2, HEIGHT / 2);
+            g2.setColor(GameConfig.GAME_OVER_COLOR);
+            g2.drawString(text, (GameConfig.WIDTH - w) / 2, GameConfig.HEIGHT / 2);
         }
-
-        if (player.reload > 0) player.reload--;
-        for (Tank e : enemies) if (e.reload > 0) e.reload--;
     }
 
-    private void drawTank(Graphics2D g2, Tank t, Color body) {
-        int x = t.x;
-        int y = t.y;
+    private String hudText() {
+        return "P1 Lives: " + playerOne.lives + " Score: " + playerOne.score
+                + "   P2 Lives: " + playerTwo.lives + " Score: " + playerTwo.score + "   R - restart";
+    }
+
+    private void updateReloads() {
+        for (Player player : players) if (player.reload > 0) player.reload--;
+        for (Enemy e : enemies) if (e.reload > 0) e.reload--;
+    }
+
+    private void drawTank(Graphics2D g2, Tank tank, Color body) {
+        if (!tank.isAlive()) return;
+        int x = tank.x;
+        int y = tank.y;
+        int size = tank.size;
+        int padding = Math.max(3, size / 8);
+        int barrelWidth = Math.max(4, size / 5);
+        int barrelLength = Math.max(12, size / 2);
+
         g2.setColor(body);
-        g2.fillRect(x + 4, y + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+        g2.fillRect(x + padding, y + padding, size - padding * 2, size - padding * 2);
 
         g2.setColor(body.darker());
-        switch (t.direction) {
-            case UP -> g2.fillRect(x + TILE_SIZE / 2 - 3, y - 6, 6, 18);
-            case DOWN -> g2.fillRect(x + TILE_SIZE / 2 - 3, y + TILE_SIZE - 12, 6, 18);
-            case LEFT -> g2.fillRect(x - 6, y + TILE_SIZE / 2 - 3, 18, 6);
-            case RIGHT -> g2.fillRect(x + TILE_SIZE - 12, y + TILE_SIZE / 2 - 3, 18, 6);
+        switch (tank.direction) {
+            case UP -> g2.fillRect(x + size / 2 - barrelWidth / 2, y - barrelLength / 3, barrelWidth, barrelLength);
+            case DOWN -> g2.fillRect(x + size / 2 - barrelWidth / 2, y + size - barrelLength * 2 / 3, barrelWidth, barrelLength);
+            case LEFT -> g2.fillRect(x - barrelLength / 3, y + size / 2 - barrelWidth / 2, barrelLength, barrelWidth);
+            case RIGHT -> g2.fillRect(x + size - barrelLength * 2 / 3, y + size / 2 - barrelWidth / 2, barrelLength, barrelWidth);
         }
     }
 
     public static void main(String[] args) {
-        SwingUtilities.invokeLater(() -> {
-            JFrame frame = new JFrame("Tanky 1990 - Java");
-            frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-            frame.setResizable(false);
-            frame.setContentPane(new Tanky1990Game());
-            frame.pack();
-            frame.setLocationRelativeTo(null);
-            frame.setVisible(true);
-        });
-    }
-
-    private enum Direction {UP, DOWN, LEFT, RIGHT}
-
-    private static class Tank {
-        int x, y;
-        Direction direction;
-        final boolean isPlayer;
-        int aiTimer = 0;
-        int reload = 0;
-
-        Tank(int x, int y, Direction direction, boolean isPlayer) {
-            this.x = x;
-            this.y = y;
-            this.direction = direction;
-            this.isPlayer = isPlayer;
-        }
-    }
-
-    private static class Bullet {
-        int x, y;
-        final int dx, dy;
-        final boolean fromPlayer;
-
-        Bullet(int x, int y, int dx, int dy, boolean fromPlayer) {
-            this.x = x;
-            this.y = y;
-            this.dx = dx;
-            this.dy = dy;
-            this.fromPlayer = fromPlayer;
-        }
+        GameClient.main(args);
     }
 }
